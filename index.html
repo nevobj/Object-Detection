@@ -1,0 +1,138 @@
+
+<!DOCTYPE html>
+<html lang="he">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>זיהוי עצמים</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+        }
+        #detections {
+            width: 90%;
+            margin: 10px auto;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body dir="rtl">
+    <h1>זיהוי עצמים במצלמה</h1>
+    <video id="video" autoplay style="display:none;"></video>
+    <canvas id="canvas"></canvas>
+    <div id="detections"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const detectionsDiv = document.getElementById('detections');
+        const context = canvas.getContext('2d');
+
+        const COLORS = {};
+
+        // פונקציה ליצירת צבע ייחודי לכל סוג עצם
+        function getColorForClass(objectClass) {
+            if (!COLORS[objectClass]) {
+                COLORS[objectClass] = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            }
+            return COLORS[objectClass];
+        }
+
+        async function startCamera() {
+            // קבלת רזולוציה מותאמת למסך
+            const constraints = {
+                video: {
+                    width: { ideal: window.innerWidth },
+                    height: { ideal: window.innerHeight },
+                    facingMode: "environment" // מצלמה אחורית
+                }
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            video.srcObject = stream;
+
+            // המתן לטעינת הווידאו
+            await new Promise(resolve => video.onloadedmetadata = resolve);
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+
+        async function detectObjects() {
+            const model = await cocoSsd.load();
+
+            async function detectFrame() {
+                const predictions = await model.detect(video);
+
+                // נקה את הקנבס
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                // נקה את תצוגת העצמים
+                detectionsDiv.innerHTML = '<h3>עצמים שזוהו:</h3>';
+
+                // ספירה ומיון העצמים
+                const counts = {};
+                predictions
+                    .filter(prediction => prediction.score > 0.6) // סינון דיוק גבוה מ-60%
+                    .forEach(prediction => {
+                        const [x, y, width, height] = prediction.bbox;
+                        const color = getColorForClass(prediction.class);
+
+                        // ציור תיבה
+                        context.beginPath();
+                        context.rect(x, y, width, height);
+                        context.lineWidth = 3;
+                        context.strokeStyle = color;
+                        context.stroke();
+
+                        // ציור טקסט עם צבע מותאם
+                        context.font = '16px Arial';
+                        context.fillStyle = color;
+                        context.fillText(
+                            `${prediction.class} (${Math.round(prediction.score * 100)}%)`,
+                            x,
+                            y > 10 ? y - 5 : y + 15
+                        );
+
+                        // ספירת סוגי עצמים
+                        counts[prediction.class] = (counts[prediction.class] || 0) + 1;
+
+                        // הוספת מידע טקסטואלי
+                        detectionsDiv.innerHTML += `
+                            <p style="color: ${color}">
+                                עצם: ${prediction.class} 
+                                | דיוק: ${Math.round(prediction.score * 100)}% 
+                                | מיקום: X: ${Math.round(x)}, Y: ${Math.round(y)}
+                            </p>
+                        `;
+                    });
+
+                // הצגת מספר העצמים מכל סוג
+                detectionsDiv.innerHTML += '<h4>סטטיסטיקה:</h4>';
+                Object.entries(counts).forEach(([objectClass, count]) => {
+                    detectionsDiv.innerHTML += `<p>${objectClass}: ${count}</p>`;
+                });
+
+                // בקשה לפריימים הבאים
+                requestAnimationFrame(detectFrame);
+            }
+
+            detectFrame();
+        }
+
+        startCamera().then(detectObjects);
+    </script>
+</body>
+</html>
